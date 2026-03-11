@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>π CLOCK</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    overflow: hidden;
+    cursor: default;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  canvas#clock { display: block; width: 100vw; height: 100vh; }
+  #ui-overlay {
+    position: fixed; inset: 0;
+    pointer-events: none; z-index: 10;
+  }
+  #ui-overlay > * { pointer-events: auto; }
+  #title {
+    position: absolute; top: 28px; left: 32px;
+    transition: opacity 0.8s ease;
+  }
+  #title h1 {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 300; font-size: clamp(24px, 3vw, 42px);
+    color: #c9a84c; letter-spacing: 0.25em; line-height: 1;
+  }
+  #title .subtitle {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 300; font-size: clamp(9px, 1vw, 13px);
+    color: #c9a84c; opacity: 0.5;
+    letter-spacing: 0.12em; margin-top: 6px;
+  }
+  #controls {
+    position: absolute; bottom: 28px; left: 50%;
+    transform: translateX(-50%);
+    display: flex; flex-direction: column;
+    align-items: center; gap: 10px;
+  }
+  #countdown {
+    font-size: clamp(11px, 1.2vw, 15px);
+    color: #c9a84c; opacity: 0.4;
+    letter-spacing: 0.08em; font-weight: 300;
+  }
+  #time-display {
+    font-size: clamp(10px, 1vw, 12px);
+    color: #c9a84c; opacity: 0.25;
+    letter-spacing: 0.05em; font-weight: 300;
+  }
+  #skip-btn {
+    background: none;
+    border: 1px solid rgba(201, 168, 76, 0.25);
+    color: #c9a84c;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: clamp(10px, 1vw, 13px);
+    font-weight: 300; padding: 6px 18px;
+    cursor: pointer; letter-spacing: 0.08em;
+    opacity: 0;
+    transition: opacity 0.4s ease, border-color 0.3s ease, background 0.3s ease;
+    border-radius: 2px;
+  }
+  #controls:hover #skip-btn, #skip-btn.visible { opacity: 0.6; }
+  #skip-btn:hover {
+    opacity: 1 !important;
+    border-color: rgba(201, 168, 76, 0.6);
+    background: rgba(201, 168, 76, 0.08);
+  }
+  #credit {
+    position: absolute; bottom: 28px; right: 32px;
+    font-size: clamp(9px, 0.9vw, 12px);
+    color: #c9a84c; opacity: 0.2;
+    letter-spacing: 0.06em; font-weight: 300;
+    transition: opacity 0.8s ease;
+  }
+  #speed-controls {
+    display: flex; gap: 4px; margin-top: 2px;
+  }
+  .speed-btn {
+    background: none;
+    border: 1px solid rgba(201, 168, 76, 0.15);
+    color: #c9a84c;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: clamp(9px, 0.9vw, 11px);
+    font-weight: 300;
+    padding: 2px 6px;
+    cursor: pointer;
+    opacity: 0.3;
+    border-radius: 2px;
+    transition: opacity 0.2s, border-color 0.2s, background 0.2s;
+  }
+  .speed-btn.active {
+    opacity: 0.85;
+    border-color: rgba(201, 168, 76, 0.6);
+    background: rgba(201, 168, 76, 0.12);
+  }
+  .speed-btn:hover { opacity: 0.7; }
+</style>
+</head>
+<body>
+<canvas id="clock"></canvas>
+<div id="ui-overlay">
+  <div id="title">
+    <h1>π CLOCK</h1>
+    <div class="subtitle">an exercise in hidden order</div>
+  </div>
+  <div id="controls">
+    <div id="countdown"></div>
+    <button id="skip-btn">Skip to 3:14</button>
+    <div id="speed-controls">
+      <button class="speed-btn active" data-speed="1">1x</button>
+      <button class="speed-btn" data-speed="2">2x</button>
+      <button class="speed-btn" data-speed="5">5x</button>
+      <button class="speed-btn" data-speed="10">10x</button>
+      <button class="speed-btn" data-speed="100">100x</button>
+      <button class="speed-btn" data-speed="500">500x</button>
+      <button class="speed-btn" data-speed="1000">1000x</button>
+    </div>
+    <div id="time-display"></div>
+  </div>
+  <div id="credit">Concept by Duncan</div>
+</div>
+
+<script>
+// ─── CONSTANTS ───────────────────────────────────────────────
+const TAU = Math.PI * 2;
+const PI = Math.PI;
+const HALF_DAY = 43200;
+const FULL_DAY = 86400;
+const ALIGN_SEC = 3 * 3600 + 14 * 60 + 15.9265358979; // 3:14:15.9265… (π as a time)
+
+// ─── SEEDED RANDOM ───────────────────────────────────────────
+function mulberry32(seed) {
+  let s = seed | 0;
+  return function() {
+    s = s + 0x6D2B79F5 | 0;
+    let t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ─── CANVAS SETUP ────────────────────────────────────────────
+const canvas = document.getElementById('clock');
+const ctx = canvas.getContext('2d');
+let W, H, scale, dpr;
+
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  scale = Math.min(W, H);
+  buildHands();
+}
+window.addEventListener('resize', resize);
+
+// ─── TIME SYSTEM ─────────────────────────────────────────────
+let timeSpeed = 1;
+let virtualTimeSec = null;
+let lastRealMs = Date.now();
+const skipBtn = document.getElementById('skip-btn');
+
+function nowSec() {
+  const now = Date.now();
+  const delta = (now - lastRealMs) / 1000;
+  lastRealMs = now;
+  if (virtualTimeSec !== null) {
+    virtualTimeSec = (virtualTimeSec + delta * timeSpeed) % FULL_DAY;
+    if (virtualTimeSec < 0) virtualTimeSec += FULL_DAY;
+    return virtualTimeSec;
+  }
+  const d = new Date();
+  return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + d.getMilliseconds() / 1000;
+}
+
+function setSpeed(s) {
+  if (s === 1 && virtualTimeSec !== null && skipBtn.textContent === 'Skip to 3:14') {
+    virtualTimeSec = null;
+  } else if (s !== 1 && virtualTimeSec === null) {
+    const d = new Date();
+    virtualTimeSec = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + d.getMilliseconds() / 1000;
+  }
+  timeSpeed = s;
+  document.querySelectorAll('.speed-btn').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.speed) === s);
+  });
+}
+
+function glowFactor(sec) {
+  const WINDOW = 50;
+  let d = Infinity;
+  for (const base of [ALIGN_SEC, ALIGN_SEC + HALF_DAY]) {
+    let diff = Math.abs(sec - base);
+    diff = Math.min(diff, FULL_DAY - diff);
+    if (diff < d) d = diff;
+  }
+  if (d > WINDOW) return 0;
+  return Math.pow(1 - d / WINDOW, 2);
+}
+
+function flashFactor(sec) {
+  const WINDOW = 3;
+  let d = Infinity;
+  for (const base of [ALIGN_SEC, ALIGN_SEC + HALF_DAY]) {
+    let diff = Math.abs(sec - base);
+    diff = Math.min(diff, FULL_DAY - diff);
+    if (diff < d) d = diff;
+  }
+  if (d > WINDOW) return 0;
+  return Math.pow(1 - d / WINDOW, 5);
+}
+
+function secUntilNextPi(sec) {
+  let best = Infinity;
+  for (const tgt of [ALIGN_SEC, ALIGN_SEC + HALF_DAY]) {
+    let d = tgt - sec;
+    if (d < -30) d += FULL_DAY;
+    if (d > 0 && d < best) best = d;
+  }
+  return best === Infinity ? ALIGN_SEC + FULL_DAY - sec : best;
+}
+
+// ─── METALLIC HAND TEMPLATE SYSTEM ──────────────────────────
+
+function metalGrad(g, maxHW) {
+  const grad = g.createLinearGradient(0, -maxHW, 0, maxHW);
+  grad.addColorStop(0, '#2e2008');
+  grad.addColorStop(0.06, '#5a4210');
+  grad.addColorStop(0.20, '#9a7a28');
+  grad.addColorStop(0.35, '#c9a84c');
+  grad.addColorStop(0.44, '#e8c860');
+  grad.addColorStop(0.50, '#ffeaa0');
+  grad.addColorStop(0.56, '#e8c860');
+  grad.addColorStop(0.65, '#c9a84c');
+  grad.addColorStop(0.80, '#9a7a28');
+  grad.addColorStop(0.94, '#5a4210');
+  grad.addColorStop(1, '#2e2008');
+  return grad;
+}
+
+function applyBrush(g, path, len, maxHW) {
+  g.save();
+  g.clip(path);
+  const rng2 = mulberry32(Math.round(len * 137 + maxHW * 53));
+  for (let dy = -maxHW - 1; dy < maxHW + 1; dy += 0.35 + rng2() * 0.25) {
+    const alpha = 0.025 + rng2() * 0.07;
+    g.fillStyle = rng2() > 0.5
+      ? `rgba(255,238,195,${alpha})`
+      : `rgba(35,24,4,${alpha})`;
+    g.fillRect(-len * 0.25, dy, len * 1.4, 0.3 + rng2() * 0.2);
+  }
+  g.restore();
+}
+
+function drawRivet(g, x, y, r) {
+  if (r < 0.4) return;
+  const grad = g.createRadialGradient(x - r * 0.3, y - r * 0.3, 0, x, y, r);
+  grad.addColorStop(0, '#ffeaa0');
+  grad.addColorStop(0.35, '#d4a843');
+  grad.addColorStop(0.7, '#9a7a28');
+  grad.addColorStop(1, '#5a4210');
+  g.beginPath();
+  g.arc(x, y, r, 0, TAU);
+  g.fillStyle = grad;
+  g.fill();
+  g.strokeStyle = 'rgba(35,24,4,0.5)';
+  g.lineWidth = Math.max(0.2, r * 0.15);
+  g.stroke();
+}
+
+// ─── VARIETY 0: BREGUET ──────────────────────────────────────
+// Skeleton Breguet: two-hump profile, diamond fretwork, moon circle,
+// small tip circle, C-scroll engravings, 3 rivets
+function drawBreguet(g, len, w) {
+  const hw = w / 2;
+  const path = new Path2D();
+
+  // Counterweight lobe
+  path.moveTo(-len * 0.04, -hw * 0.42);
+  path.bezierCurveTo(-len * 0.08, -hw * 0.78, -len * 0.14, -hw * 0.68, -len * 0.14, 0);
+  path.bezierCurveTo(-len * 0.14, hw * 0.88, -len * 0.07, hw * 0.68, -len * 0.04, hw * 0.52);
+
+  // Bottom: neck → first hump → waist → moon housing → paddle tip
+  path.lineTo(0, hw * 0.48);
+  path.quadraticCurveTo(len * 0.10, hw * 0.60, len * 0.20, hw * 0.68);
+  path.quadraticCurveTo(len * 0.30, hw * 0.72, len * 0.38, hw * 0.58);
+  path.quadraticCurveTo(len * 0.42, hw * 0.38, len * 0.46, hw * 0.44);
+  path.quadraticCurveTo(len * 0.52, hw * 0.70, len * 0.58, hw * 0.70);
+  path.lineTo(len * 0.74, hw * 0.62);
+  path.quadraticCurveTo(len * 0.86, hw * 0.38, len, 0);
+
+  // Top: thinner asymmetric mirror
+  path.quadraticCurveTo(len * 0.86, -hw * 0.30, len * 0.74, -hw * 0.50);
+  path.lineTo(len * 0.58, -hw * 0.58);
+  path.quadraticCurveTo(len * 0.52, -hw * 0.58, len * 0.46, -hw * 0.36);
+  path.quadraticCurveTo(len * 0.42, -hw * 0.28, len * 0.38, -hw * 0.46);
+  path.quadraticCurveTo(len * 0.30, -hw * 0.60, len * 0.20, -hw * 0.56);
+  path.quadraticCurveTo(len * 0.10, -hw * 0.48, 0, -hw * 0.38);
+  path.lineTo(-len * 0.04, -hw * 0.42);
+  path.closePath();
+
+  const maxHW = hw * 0.90;
+  g.fillStyle = metalGrad(g, maxHW);
+  g.fill(path);
+  applyBrush(g, path, len, maxHW);
+  g.strokeStyle = 'rgba(255,230,170,0.3)';
+  g.lineWidth = 0.45;
+  g.stroke(path);
+
+  if (len > 20) {
+    g.save();
+    g.globalCompositeOperation = 'destination-out';
+
+    // Cutout 1: diamond fretwork in first body hump
+    g.beginPath();
+    const dx = len * 0.24, dy = hw * 0.05;
+    g.moveTo(dx, dy - hw * 0.28);
+    g.lineTo(dx + len * 0.06, dy);
+    g.moveTo(dx, dy - hw * 0.28);
+    g.quadraticCurveTo(dx + len * 0.035, dy - hw * 0.14, dx + len * 0.06, dy);
+    g.quadraticCurveTo(dx + len * 0.035, dy + hw * 0.16, dx, dy + hw * 0.28);
+    g.quadraticCurveTo(dx - len * 0.035, dy + hw * 0.14, dx - len * 0.06, dy);
+    g.quadraticCurveTo(dx - len * 0.035, dy - hw * 0.14, dx, dy - hw * 0.28);
+    g.fill();
+
+    // Cutout 2: signature moon circle
+    const moonR = Math.max(1.8, Math.min(hw * 0.32, len * 0.042));
+    const moonX = len * 0.65, moonY = hw * 0.06;
+    g.beginPath();
+    g.arc(moonX, moonY, moonR, 0, TAU);
+    g.fill();
+
+    // Cutout 3: small circle near tip
+    const tipR = Math.max(0.8, moonR * 0.45);
+    g.beginPath();
+    g.arc(len * 0.82, -hw * 0.04, tipR, 0, TAU);
+    g.fill();
+
+    g.restore();
+
+    // Cutout edge highlights
+    g.strokeStyle = 'rgba(35,20,4,0.5)';
+    g.lineWidth = 0.35;
+    // Diamond edge
+    g.beginPath();
+    g.moveTo(dx, dy - hw * 0.28);
+    g.quadraticCurveTo(dx + len * 0.035, dy - hw * 0.14, dx + len * 0.06, dy);
+    g.quadraticCurveTo(dx + len * 0.035, dy + hw * 0.16, dx, dy + hw * 0.28);
+    g.quadraticCurveTo(dx - len * 0.035, dy + hw * 0.14, dx - len * 0.06, dy);
+    g.quadraticCurveTo(dx - len * 0.035, dy - hw * 0.14, dx, dy - hw * 0.28);
+    g.stroke();
+    // Moon edge
+    g.beginPath(); g.arc(moonX, moonY, moonR, 0, TAU); g.stroke();
+    g.strokeStyle = 'rgba(255,230,170,0.12)'; g.lineWidth = 0.2;
+    g.beginPath(); g.arc(moonX, moonY, moonR * 0.8, 0, TAU); g.stroke();
+    // Tip circle edge
+    g.strokeStyle = 'rgba(35,20,4,0.45)'; g.lineWidth = 0.3;
+    g.beginPath(); g.arc(len * 0.82, -hw * 0.04, tipR, 0, TAU); g.stroke();
+  }
+
+  // C-scroll engravings between cutouts
+  g.strokeStyle = 'rgba(255,220,140,0.09)';
+  g.lineWidth = 0.3;
+  g.beginPath();
+  g.moveTo(len * 0.36, hw * 0.12);
+  g.bezierCurveTo(len * 0.40, hw * 0.28, len * 0.44, hw * 0.22, len * 0.48, hw * 0.08);
+  g.stroke();
+  g.beginPath();
+  g.moveTo(len * 0.36, -hw * 0.08);
+  g.bezierCurveTo(len * 0.40, -hw * 0.22, len * 0.44, -hw * 0.16, len * 0.48, -hw * 0.04);
+  g.stroke();
+
+  // Rivets
+  drawRivet(g, len * 0.08, hw * 0.03, Math.max(0.8, hw * 0.14));
+  drawRivet(g, len * 0.44, hw * 0.00, Math.max(0.6, hw * 0.10));
+  drawRivet(g, len * 0.76, hw * 0.02, Math.max(0.6, hw * 0.09));
+
+  // Center-line engraving
+  g.strokeStyle = 'rgba(45,30,5,0.14)';
+  g.lineWidth = 0.22;
+  g.beginPath();
+  g.moveTo(len * 0.06, hw * 0.04);
+  g.lineTo(len * 0.18, hw * 0.06);
+  g.stroke();
+}
+
+// ─── VARIETY 1: CATHEDRAL ────────────────────────────────────
+// Gothic tracery: twin pointed-arch windows divided by spine,
+// trefoil circle at tip, cross detail, 3 rivets
+function drawCathedral(g, len, w) {
+  const hw = w / 2;
+  const path = new Path2D();
+
+  // Base with flared collar
+  path.moveTo(-len * 0.02, -hw * 0.42);
+  path.lineTo(-len * 0.02, hw * 0.52);
+
+  // Bottom: collar flare → wide body → waist → trefoil tip
+  path.quadraticCurveTo(len * 0.04, hw * 0.74, len * 0.10, hw * 0.78);
+  path.lineTo(len * 0.54, hw * 0.62);
+  path.quadraticCurveTo(len * 0.62, hw * 0.52, len * 0.68, hw * 0.36);
+  path.quadraticCurveTo(len * 0.74, hw * 0.42, len * 0.80, hw * 0.34);
+  path.quadraticCurveTo(len * 0.90, hw * 0.18, len, 0);
+
+  // Top edge
+  path.quadraticCurveTo(len * 0.90, -hw * 0.14, len * 0.80, -hw * 0.28);
+  path.quadraticCurveTo(len * 0.74, -hw * 0.36, len * 0.68, -hw * 0.28);
+  path.quadraticCurveTo(len * 0.62, -hw * 0.42, len * 0.54, -hw * 0.52);
+  path.lineTo(len * 0.10, -hw * 0.66);
+  path.quadraticCurveTo(len * 0.04, -hw * 0.62, -len * 0.02, -hw * 0.42);
+  path.closePath();
+
+  const maxHW = hw * 0.80;
+  g.fillStyle = metalGrad(g, maxHW);
+  g.fill(path);
+  applyBrush(g, path, len, maxHW);
+  g.strokeStyle = 'rgba(255,230,170,0.25)';
+  g.lineWidth = 0.4;
+  g.stroke(path);
+
+  if (len > 20) {
+    g.save();
+    g.globalCompositeOperation = 'destination-out';
+
+    // Cutout 1: left pointed-arch window
+    g.beginPath();
+    g.moveTo(len * 0.18, hw * 0.42);
+    g.lineTo(len * 0.18, hw * 0.02);
+    g.quadraticCurveTo(len * 0.24, -hw * 0.28, len * 0.30, hw * 0.02);
+    g.lineTo(len * 0.30, hw * 0.42);
+    g.quadraticCurveTo(len * 0.24, hw * 0.48, len * 0.18, hw * 0.42);
+    g.fill();
+
+    // Cutout 2: right pointed-arch window
+    g.beginPath();
+    g.moveTo(len * 0.32, hw * 0.38);
+    g.lineTo(len * 0.32, -hw * 0.02);
+    g.quadraticCurveTo(len * 0.38, -hw * 0.32, len * 0.44, -hw * 0.02);
+    g.lineTo(len * 0.44, hw * 0.38);
+    g.quadraticCurveTo(len * 0.38, hw * 0.44, len * 0.32, hw * 0.38);
+    g.fill();
+
+    // Cutout 3: trefoil circle near tip
+    const tfR = Math.max(1, hw * 0.16);
+    g.beginPath();
+    g.arc(len * 0.76, hw * 0.02, tfR, 0, TAU);
+    g.fill();
+
+    g.restore();
+
+    // Cutout edges
+    g.strokeStyle = 'rgba(35,20,4,0.45)';
+    g.lineWidth = 0.3;
+    // Left arch edge
+    g.beginPath();
+    g.moveTo(len * 0.18, hw * 0.42);
+    g.lineTo(len * 0.18, hw * 0.02);
+    g.quadraticCurveTo(len * 0.24, -hw * 0.28, len * 0.30, hw * 0.02);
+    g.lineTo(len * 0.30, hw * 0.42);
+    g.quadraticCurveTo(len * 0.24, hw * 0.48, len * 0.18, hw * 0.42);
+    g.stroke();
+    // Right arch edge
+    g.beginPath();
+    g.moveTo(len * 0.32, hw * 0.38);
+    g.lineTo(len * 0.32, -hw * 0.02);
+    g.quadraticCurveTo(len * 0.38, -hw * 0.32, len * 0.44, -hw * 0.02);
+    g.lineTo(len * 0.44, hw * 0.38);
+    g.quadraticCurveTo(len * 0.38, hw * 0.44, len * 0.32, hw * 0.38);
+    g.stroke();
+    // Trefoil edge
+    g.beginPath(); g.arc(len * 0.76, hw * 0.02, tfR, 0, TAU); g.stroke();
+
+    // Central spine between windows
+    g.strokeStyle = 'rgba(255,220,140,0.10)';
+    g.lineWidth = 0.4;
+    g.beginPath();
+    g.moveTo(len * 0.30, hw * 0.04);
+    g.lineTo(len * 0.32, -hw * 0.02);
+    g.stroke();
+  }
+
+  // Cross detail at base
+  g.strokeStyle = 'rgba(255,220,140,0.08)';
+  g.lineWidth = 0.35;
+  g.beginPath();
+  g.moveTo(len * 0.06, -hw * 0.18);
+  g.lineTo(len * 0.06, hw * 0.22);
+  g.moveTo(len * 0.02, hw * 0.02);
+  g.lineTo(len * 0.10, hw * 0.02);
+  g.stroke();
+
+  // Scrollwork between arches and trefoil
+  g.strokeStyle = 'rgba(255,220,140,0.07)';
+  g.lineWidth = 0.25;
+  g.beginPath();
+  g.moveTo(len * 0.50, hw * 0.14);
+  g.bezierCurveTo(len * 0.56, hw * 0.30, len * 0.62, hw * 0.24, len * 0.66, hw * 0.10);
+  g.stroke();
+  g.beginPath();
+  g.moveTo(len * 0.50, -hw * 0.08);
+  g.bezierCurveTo(len * 0.56, -hw * 0.22, len * 0.62, -hw * 0.18, len * 0.66, -hw * 0.06);
+  g.stroke();
+
+  // Rivets
+  drawRivet(g, len * 0.10, hw * 0.06, Math.max(0.8, hw * 0.13));
+  drawRivet(g, len * 0.52, -hw * 0.02, Math.max(0.7, hw * 0.10));
+  drawRivet(g, len * 0.68, hw * 0.02, Math.max(0.6, hw * 0.09));
+}
+
+// ─── VARIETY 2: SPADE ────────────────────────────────────────
+// Fretwork spade: scalloped shaft edges, 3 cutouts (shaft slot,
+// teardrop in spade, small tip circle), vine scrollwork, 2 rivets
+function drawSpade(g, len, w) {
+  const hw = w / 2;
+  const path = new Path2D();
+
+  // Small tail
+  path.moveTo(-len * 0.05, -hw * 0.18);
+  path.lineTo(-len * 0.05, hw * 0.26);
+
+  // Bottom: scalloped shaft → spade bulge
+  path.lineTo(0, hw * 0.24);
+  path.quadraticCurveTo(len * 0.08, hw * 0.32, len * 0.14, hw * 0.22);
+  path.quadraticCurveTo(len * 0.20, hw * 0.30, len * 0.26, hw * 0.22);
+  path.quadraticCurveTo(len * 0.32, hw * 0.30, len * 0.38, hw * 0.22);
+  path.lineTo(len * 0.42, hw * 0.20);
+  path.quadraticCurveTo(len * 0.52, hw * 0.22, len * 0.58, hw * 0.65);
+  path.quadraticCurveTo(len * 0.68, hw * 0.72, len * 0.78, hw * 0.42);
+  path.quadraticCurveTo(len * 0.88, hw * 0.18, len, 0);
+
+  // Top: flatter spade + scalloped shaft
+  path.quadraticCurveTo(len * 0.88, -hw * 0.14, len * 0.78, -hw * 0.32);
+  path.quadraticCurveTo(len * 0.68, -hw * 0.58, len * 0.58, -hw * 0.52);
+  path.quadraticCurveTo(len * 0.52, -hw * 0.16, len * 0.42, -hw * 0.14);
+  path.lineTo(len * 0.38, -hw * 0.16);
+  path.quadraticCurveTo(len * 0.32, -hw * 0.24, len * 0.26, -hw * 0.16);
+  path.quadraticCurveTo(len * 0.20, -hw * 0.24, len * 0.14, -hw * 0.16);
+  path.quadraticCurveTo(len * 0.08, -hw * 0.24, 0, -hw * 0.18);
+
+  path.lineTo(-len * 0.05, -hw * 0.18);
+  path.closePath();
+
+  const maxHW = hw * 0.72;
+  g.fillStyle = metalGrad(g, maxHW);
+  g.fill(path);
+  applyBrush(g, path, len, maxHW);
+  g.strokeStyle = 'rgba(255,230,170,0.28)';
+  g.lineWidth = 0.4;
+  g.stroke(path);
+
+  if (len > 22) {
+    g.save();
+    g.globalCompositeOperation = 'destination-out';
+
+    // Cutout 1: narrow slot along shaft
+    g.beginPath();
+    g.moveTo(len * 0.12, hw * 0.02);
+    g.lineTo(len * 0.38, hw * 0.03);
+    g.lineTo(len * 0.38, -hw * 0.03);
+    g.lineTo(len * 0.12, -hw * 0.02);
+    g.closePath();
+    g.fill();
+
+    // Cutout 2: teardrop in spade
+    const cx0 = len * 0.67, cy0 = hw * 0.08;
+    g.beginPath();
+    g.ellipse(cx0, cy0, len * 0.035, hw * 0.20, PI * 0.05, 0, TAU);
+    g.fill();
+
+    // Cutout 3: small circle near tip
+    const tipR = Math.max(0.7, hw * 0.12);
+    g.beginPath();
+    g.arc(len * 0.84, -hw * 0.02, tipR, 0, TAU);
+    g.fill();
+
+    g.restore();
+
+    // Cutout edges
+    g.strokeStyle = 'rgba(35,20,4,0.4)';
+    g.lineWidth = 0.28;
+    // Slot edge
+    g.beginPath();
+    g.moveTo(len * 0.12, hw * 0.02);
+    g.lineTo(len * 0.38, hw * 0.03);
+    g.lineTo(len * 0.38, -hw * 0.03);
+    g.lineTo(len * 0.12, -hw * 0.02);
+    g.closePath();
+    g.stroke();
+    // Teardrop edge
+    g.beginPath();
+    g.ellipse(cx0, cy0, len * 0.035, hw * 0.20, PI * 0.05, 0, TAU);
+    g.stroke();
+    // Tip circle edge
+    g.beginPath(); g.arc(len * 0.84, -hw * 0.02, tipR, 0, TAU); g.stroke();
+  }
+
+  // Vine scrollwork along shaft
+  g.strokeStyle = 'rgba(255,220,140,0.08)';
+  g.lineWidth = 0.25;
+  g.beginPath();
+  g.moveTo(len * 0.08, hw * 0.12);
+  g.bezierCurveTo(len * 0.14, hw * 0.20, len * 0.20, hw * 0.10, len * 0.26, hw * 0.16);
+  g.bezierCurveTo(len * 0.32, hw * 0.22, len * 0.36, hw * 0.12, len * 0.40, hw * 0.14);
+  g.stroke();
+  g.beginPath();
+  g.moveTo(len * 0.08, -hw * 0.10);
+  g.bezierCurveTo(len * 0.14, -hw * 0.16, len * 0.20, -hw * 0.08, len * 0.26, -hw * 0.12);
+  g.stroke();
+
+  // Rivets
+  drawRivet(g, len * 0.06, hw * 0.02, Math.max(0.6, hw * 0.10));
+  drawRivet(g, len * 0.50, hw * 0.00, Math.max(0.6, hw * 0.09));
+}
+
+// ─── VARIETY 3: SERPENTINE ───────────────────────────────────
+// Baroque serpentine: fleur-de-lis tip lobes, 3 cutouts (two tilted
+// ovals + tip circle), baroque scrollwork engravings, 2 rivets
+function drawSerpentine(g, len, w) {
+  const hw = w / 2;
+  const path = new Path2D();
+
+  // Base
+  path.moveTo(-len * 0.03, -hw * 0.38);
+
+  // Top edge: S-curve with fleur-de-lis tip
+  path.bezierCurveTo(
+    len * 0.12, -hw * 0.68,
+    len * 0.28, -hw * 0.64,
+    len * 0.42, -hw * 0.42
+  );
+  path.bezierCurveTo(
+    len * 0.58, -hw * 0.20,
+    len * 0.72, -hw * 0.16,
+    len * 0.82, -hw * 0.24
+  );
+  // Fleur-de-lis top lobe
+  path.quadraticCurveTo(len * 0.88, -hw * 0.38, len * 0.92, -hw * 0.18);
+  path.quadraticCurveTo(len * 0.96, -hw * 0.06, len, 0);
+
+  // Fleur-de-lis bottom lobe
+  path.quadraticCurveTo(len * 0.96, hw * 0.10, len * 0.92, hw * 0.24);
+  path.quadraticCurveTo(len * 0.88, hw * 0.42, len * 0.82, hw * 0.30);
+
+  // Bottom edge: opposite S
+  path.bezierCurveTo(
+    len * 0.72, hw * 0.30,
+    len * 0.58, hw * 0.50,
+    len * 0.42, hw * 0.64
+  );
+  path.bezierCurveTo(
+    len * 0.28, hw * 0.76,
+    len * 0.12, hw * 0.74,
+    -len * 0.03, hw * 0.52
+  );
+  path.closePath();
+
+  const maxHW = hw * 0.78;
+  g.fillStyle = metalGrad(g, maxHW);
+  g.fill(path);
+  applyBrush(g, path, len, maxHW);
+  g.strokeStyle = 'rgba(255,230,170,0.25)';
+  g.lineWidth = 0.35;
+  g.stroke(path);
+
+  if (len > 20) {
+    g.save();
+    g.globalCompositeOperation = 'destination-out';
+
+    // Cutout 1: tilted oval following first S-bend
+    const ov1R = Math.max(1.2, Math.min(hw * 0.22, len * 0.028));
+    g.beginPath();
+    g.ellipse(len * 0.24, -hw * 0.08, ov1R * 1.6, ov1R, -PI * 0.20, 0, TAU);
+    g.fill();
+
+    // Cutout 2: tilted oval following second S-bend
+    const ov2R = Math.max(1.0, Math.min(hw * 0.18, len * 0.024));
+    g.beginPath();
+    g.ellipse(len * 0.50, hw * 0.16, ov2R * 1.5, ov2R, PI * 0.15, 0, TAU);
+    g.fill();
+
+    // Cutout 3: small circle between fleur-de-lis lobes
+    const tipR = Math.max(0.7, hw * 0.12);
+    g.beginPath();
+    g.arc(len * 0.88, hw * 0.01, tipR, 0, TAU);
+    g.fill();
+
+    g.restore();
+
+    // Cutout edges
+    g.strokeStyle = 'rgba(35,20,4,0.4)';
+    g.lineWidth = 0.25;
+    g.beginPath();
+    g.ellipse(len * 0.24, -hw * 0.08, ov1R * 1.6, ov1R, -PI * 0.20, 0, TAU);
+    g.stroke();
+    g.beginPath();
+    g.ellipse(len * 0.50, hw * 0.16, ov2R * 1.5, ov2R, PI * 0.15, 0, TAU);
+    g.stroke();
+    g.beginPath(); g.arc(len * 0.88, hw * 0.01, tipR, 0, TAU); g.stroke();
+  }
+
+  // Baroque scrollwork engravings following S-curve
+  g.strokeStyle = 'rgba(255,220,140,0.08)';
+  g.lineWidth = 0.28;
+  g.beginPath();
+  g.moveTo(len * 0.10, hw * 0.18);
+  g.bezierCurveTo(len * 0.18, -hw * 0.08, len * 0.30, hw * 0.30, len * 0.40, hw * 0.12);
+  g.stroke();
+  g.beginPath();
+  g.moveTo(len * 0.44, hw * 0.06);
+  g.bezierCurveTo(len * 0.52, hw * 0.32, len * 0.62, hw * 0.20, len * 0.70, hw * 0.10);
+  g.stroke();
+  // Counter scroll on opposite side
+  g.beginPath();
+  g.moveTo(len * 0.14, -hw * 0.32);
+  g.bezierCurveTo(len * 0.22, -hw * 0.48, len * 0.30, -hw * 0.36, len * 0.36, -hw * 0.22);
+  g.stroke();
+
+  // Rivets
+  drawRivet(g, len * 0.11, hw * 0.14, Math.max(0.6, hw * 0.11));
+  drawRivet(g, len * 0.60, hw * 0.04, Math.max(0.6, hw * 0.10));
+}
+
+// ─── TEMPLATE FACTORY ────────────────────────────────────────
+const DRAW_FNS = [drawBreguet, drawCathedral, drawSpade, drawSerpentine];
+
+function createHandTemplate(length, baseWidth, variety) {
+  const cwExt = length * 0.18;
+  const maxHW = baseWidth * 1.4;
+  const pad = Math.max(4, baseWidth * 0.6);
+  const totalW = cwExt + length + pad;
+  const totalH = maxHW * 2 + pad;
+  const pivotX = cwExt + pad / 2;
+  const pivotY = totalH / 2;
+
+  const c = document.createElement('canvas');
+  c.width = Math.ceil(totalW * dpr);
+  c.height = Math.ceil(totalH * dpr);
+  const g = c.getContext('2d');
+  g.scale(dpr, dpr);
+  g.translate(pivotX, pivotY);
+
+  DRAW_FNS[variety](g, length, baseWidth);
+
+  return { canvas: c, pivotX, pivotY, width: totalW, height: totalH };
+}
+
+// ─── HAND SYSTEM ─────────────────────────────────────────────
+let hands = [];
+
+function makeHand(rng, cx, cy, length, targetAngle, k, role, variety) {
+  const omega = TAU * k / HALF_DAY;
+  const phase = targetAngle - omega * ALIGN_SEC;
+  // Uniform visual quality: same size/opacity ranges for all roles
+  const baseWidth = 6 + rng() * 5;
+  const opacity = 0.42 + rng() * 0.25;
+  const template = createHandTemplate(length, baseWidth, variety);
+  return { cx, cy, length, baseWidth, targetAngle, k, omega, phase, opacity, role, variety, template };
+}
+
+function buildHands() {
+  hands = [];
+  const rng = mulberry32(314159);
+  const cx = W * 0.5;
+  const cy = H * 0.5;
+  const piW = scale * 0.28;
+  const piH = scale * 0.30;
+
+  // π geometry
+  const barYBase = cy - piH * 0.24;
+  const archH = piH * 0.09;
+  const barLeft = cx - piW * 0.52;
+  const barRight = cx + piW * 0.52;
+  const barLen = barRight - barLeft;
+  const leftLegX = cx - piW * 0.27;
+  const rightLegX = cx + piW * 0.27;
+  const legT = (leftLegX - barLeft) / barLen;
+  const legTop = barYBase - archH * Math.sin(PI * legT);
+  const legBottom = cy + piH * 0.46;
+  const legLen = legBottom - legTop;
+  const piCY = (barYBase - archH + legBottom) / 2;
+  const ringRx = scale * 0.19;
+  const ringRy = scale * 0.165;
+
+  // ── 1. FIELD HANDS: 120 — all point toward center of π ──
+  // Hands inside the ring ellipse are excluded (they look awkward
+  // pointing inward when already at the center of π)
+  for (let i = 0; i < 120; i++) {
+    const k = 12 + Math.floor(rng() * 960);
+    const fx = rng() * W;
+    const fy = rng() * H;
+    const length = scale * (0.030 + rng() * 0.050);
+    // Exclusion zone: skip hands inside the guardian ring
+    const ex = (fx - cx) / ringRx;
+    const ey = (fy - piCY) / ringRy;
+    if (ex * ex + ey * ey < 1.0) {
+      rng(); rng(); rng(); // consume same rng count to keep sequence stable
+      continue;
+    }
+    const targetAngle = Math.atan2(piCY - fy, cx - fx);
+    const variety = Math.floor(rng() * 4);
+    hands.push(makeHand(rng, fx, fy, length, targetAngle, k, 'field', variety));
+  }
+
+  // ── 2. GUARDIAN RING: 18 — point radially outward ──
+  const ringKs = [24,120,36,84,18,144,48,96,30,132,42,72,21,156,54,108,27,60];
+  for (let i = 0; i < 18; i++) {
+    const theta = TAU * i / 18 - PI / 2;
+    const px = cx + ringRx * Math.cos(theta);
+    const py = piCY + ringRy * Math.sin(theta);
+    const outAngle = Math.atan2(py - piCY, px - cx);
+    const variety = i % 4;
+    hands.push(makeHand(rng, px, py,
+      scale * (0.065 + rng() * 0.040),
+      outAngle, ringKs[i], 'ring', variety));
+  }
+
+  // ── 3. TOP BAR: 12 — follow arch tangent ──
+  const barKs = [14,72,18,96,12,60,24,108,15,84,20,66];
+  for (let i = 0; i < 12; i++) {
+    const t = i / 11;
+    const px = barLeft + barLen * t;
+    const py = barYBase - archH * Math.sin(PI * t);
+    let tangent = Math.atan2(-archH * PI * Math.cos(PI * t), barLen);
+    if (i === 0) tangent += 0.18;
+    if (i === 11) tangent -= 0.18;
+    const target = (i % 2 === 0) ? tangent : tangent + PI;
+    const variety = i % 4;
+    hands.push(makeHand(rng, px, py,
+      scale * (0.036 + rng() * 0.016),
+      target, barKs[i], 'bar', variety));
+  }
+
+  // ── 4. LEFT LEG: 7 ──
+  const leftKs = [16,84,20,54,28,108,14];
+  for (let i = 0; i < 7; i++) {
+    const t = (i + 1) / 8;
+    const target = (i % 2 === 0) ? PI / 2 : -PI / 2;
+    hands.push(makeHand(rng, leftLegX, legTop + legLen * t,
+      scale * (0.034 + rng() * 0.014),
+      target, leftKs[i], 'leg', i % 4));
+  }
+
+  // ── 5. RIGHT LEG: 7 ──
+  const rightKs = [18,90,22,66,26,114,16];
+  for (let i = 0; i < 7; i++) {
+    const t = (i + 1) / 8;
+    const target = (i % 2 === 0) ? PI / 2 : -PI / 2;
+    hands.push(makeHand(rng, rightLegX, legTop + legLen * t,
+      scale * (0.034 + rng() * 0.014),
+      target, rightKs[i], 'leg', (i + 2) % 4));
+  }
+}
+
+// ─── RENDERING ───────────────────────────────────────────────
+const countdownEl = document.getElementById('countdown');
+const timeDisplayEl = document.getElementById('time-display');
+const titleEl = document.getElementById('title');
+const creditEl = document.getElementById('credit');
+
+let lastMouseMove = Date.now();
+document.addEventListener('mousemove', () => { lastMouseMove = Date.now(); });
+document.addEventListener('touchstart', () => { lastMouseMove = Date.now(); });
+
+function loop() {
+  requestAnimationFrame(loop);
+  const sec = nowSec();
+  const gf = glowFactor(sec);
+
+  // Background
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+
+  // Warm center glow
+  const grad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, scale * 0.6);
+  grad.addColorStop(0, `rgba(201, 168, 76, ${0.008 + gf * 0.04})`);
+  grad.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Grain
+  for (let i = 0; i < 40; i++) {
+    ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.007})`;
+    ctx.fillRect(Math.random() * W, Math.random() * H, 1, 1);
+  }
+
+  // Bloom behind π near alignment (wider, more intense)
+  if (gf > 0.15) {
+    const bloom = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, scale * 0.40);
+    const ba = (gf - 0.15) / 0.85 * 0.25;
+    bloom.addColorStop(0, `rgba(201, 168, 76, ${ba})`);
+    bloom.addColorStop(0.35, `rgba(201, 168, 76, ${ba * 0.4})`);
+    bloom.addColorStop(0.7, `rgba(201, 168, 76, ${ba * 0.08})`);
+    bloom.addColorStop(1, 'transparent');
+    ctx.fillStyle = bloom;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // Draw hands — uniform glow across all roles
+  for (const h of hands) {
+    const angle = h.omega * sec + h.phase;
+    let alpha = h.opacity * (1 + gf * 0.4);
+    const glowAmt = gf * 13;
+
+    ctx.save();
+    ctx.translate(h.cx, h.cy);
+    ctx.rotate(angle);
+    ctx.globalAlpha = Math.min(1, alpha);
+
+    if (glowAmt > 0.5) {
+      ctx.shadowColor = `rgba(201, 168, 76, ${Math.min(0.6, gf * 0.5)})`;
+      ctx.shadowBlur = glowAmt;
+    }
+
+    const t = h.template;
+    ctx.drawImage(t.canvas, -t.pivotX, -t.pivotY, t.width, t.height);
+    ctx.restore();
+  }
+
+  // Flash at exact π alignment
+  const ff = flashFactor(sec);
+  if (ff > 0.01) {
+    // Screen-wide golden wash
+    ctx.fillStyle = `rgba(255, 238, 195, ${ff * 0.30})`;
+    ctx.fillRect(0, 0, W, H);
+
+    // Intense center burst
+    const burstGrad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, scale * 0.50);
+    burstGrad.addColorStop(0, `rgba(255, 245, 210, ${ff * 0.55})`);
+    burstGrad.addColorStop(0.25, `rgba(201, 168, 76, ${ff * 0.30})`);
+    burstGrad.addColorStop(0.6, `rgba(201, 168, 76, ${ff * 0.08})`);
+    burstGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = burstGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Expanding golden ring
+    const expansion = 1 - ff;
+    const ringR = scale * (0.06 + expansion * 0.45);
+    ctx.strokeStyle = `rgba(255, 235, 180, ${ff * 0.65})`;
+    ctx.lineWidth = 1 + ff * 4;
+    ctx.beginPath();
+    ctx.arc(W / 2, H / 2, ringR, 0, TAU);
+    ctx.stroke();
+
+    // Second trailing ring
+    if (expansion > 0.15) {
+      const ringR2 = scale * (0.06 + (expansion - 0.15) * 0.45);
+      ctx.strokeStyle = `rgba(255, 235, 180, ${ff * 0.3})`;
+      ctx.lineWidth = 0.5 + ff * 2;
+      ctx.beginPath();
+      ctx.arc(W / 2, H / 2, ringR2, 0, TAU);
+      ctx.stroke();
+    }
+  }
+
+  updateUI(sec, gf);
+}
+
+function updateUI(sec, gf) {
+  if (gf > 0.9) {
+    countdownEl.textContent = 'π aligned';
+    countdownEl.style.opacity = '0.7';
+  } else {
+    const remain = secUntilNextPi(sec);
+    const h = Math.floor(remain / 3600);
+    const m = Math.floor((remain % 3600) / 60);
+    const s = Math.floor(remain % 60);
+    countdownEl.textContent = `Next π: ${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+    countdownEl.style.opacity = '';
+  }
+  const hh = Math.floor(sec / 3600) % 24;
+  const mm = Math.floor((sec % 3600) / 60);
+  const ss = Math.floor(sec % 60);
+  const ampm = hh >= 12 ? 'PM' : 'AM';
+  const h12 = hh % 12 || 12;
+  const speedLabel = timeSpeed !== 1 ? ` (${timeSpeed}x)` : virtualTimeSec !== null ? ' (sim)' : '';
+  timeDisplayEl.textContent = `${h12}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')} ${ampm}${speedLabel}`;
+  const idle = Date.now() - lastMouseMove;
+  const uiOp = idle > 5000 ? 0.15 : 1;
+  titleEl.style.opacity = uiOp;
+  creditEl.style.opacity = Math.min(0.2, uiOp * 0.2);
+}
+
+// ─── SKIP BUTTON & SPEED CONTROLS ────────────────────────────
+skipBtn.addEventListener('click', () => {
+  if (virtualTimeSec !== null) {
+    virtualTimeSec = null;
+    timeSpeed = 1;
+    skipBtn.textContent = 'Skip to 3:14';
+    skipBtn.classList.remove('visible');
+    setSpeed(1);
+  } else {
+    virtualTimeSec = ALIGN_SEC - 45;
+    skipBtn.textContent = 'Return to real time';
+    skipBtn.classList.add('visible');
+  }
+});
+
+document.querySelectorAll('.speed-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    setSpeed(parseInt(btn.dataset.speed));
+  });
+});
+
+
+// ─── INIT ────────────────────────────────────────────────────
+resize();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

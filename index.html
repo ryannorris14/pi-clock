@@ -110,6 +110,7 @@
   <div id="controls">
     <div id="countdown"></div>
     <button id="skip-btn">Skip to 3:14</button>
+    <button id="now-btn" class="speed-btn" style="display:none;">Now</button>
     <div id="speed-controls">
       <button class="speed-btn active" data-speed="1">1x</button>
       <button class="speed-btn" data-speed="2">2x</button>
@@ -167,6 +168,7 @@ let timeSpeed = 1;
 let virtualTimeSec = null;
 let lastRealMs = Date.now();
 const skipBtn = document.getElementById('skip-btn');
+const nowBtn = document.getElementById('now-btn');
 
 function nowSec() {
   const now = Date.now();
@@ -182,9 +184,7 @@ function nowSec() {
 }
 
 function setSpeed(s) {
-  if (s === 1 && virtualTimeSec !== null && skipBtn.textContent === 'Skip to 3:14') {
-    virtualTimeSec = null;
-  } else if (s !== 1 && virtualTimeSec === null) {
+  if (s !== 1 && virtualTimeSec === null) {
     const d = new Date();
     virtualTimeSec = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds() + d.getMilliseconds() / 1000;
   }
@@ -192,6 +192,7 @@ function setSpeed(s) {
   document.querySelectorAll('.speed-btn').forEach(b => {
     b.classList.toggle('active', parseInt(b.dataset.speed) === s);
   });
+  nowBtn.style.display = virtualTimeSec !== null ? '' : 'none';
 }
 
 function glowFactor(sec) {
@@ -989,18 +990,31 @@ function updateUI(sec, gf) {
 }
 
 // ─── SKIP BUTTON & SPEED CONTROLS ────────────────────────────
+function returnToRealTime() {
+  virtualTimeSec = null;
+  timeSpeed = 1;
+  lastRealMs = Date.now();
+  skipBtn.textContent = 'Skip to 3:14';
+  skipBtn.classList.remove('visible');
+  nowBtn.style.display = 'none';
+  document.querySelectorAll('.speed-btn').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.speed) === 1);
+  });
+}
+
 skipBtn.addEventListener('click', () => {
-  if (virtualTimeSec !== null) {
-    virtualTimeSec = null;
-    timeSpeed = 1;
-    skipBtn.textContent = 'Skip to 3:14';
-    skipBtn.classList.remove('visible');
-    setSpeed(1);
+  if (virtualTimeSec !== null && skipBtn.textContent === 'Return to real time') {
+    returnToRealTime();
   } else {
     virtualTimeSec = ALIGN_SEC - 45;
     skipBtn.textContent = 'Return to real time';
     skipBtn.classList.add('visible');
+    nowBtn.style.display = '';
   }
+});
+
+nowBtn.addEventListener('click', () => {
+  returnToRealTime();
 });
 
 document.querySelectorAll('.speed-btn').forEach(btn => {

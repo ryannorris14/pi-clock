@@ -110,3 +110,17 @@ Audited `index.html` and the repo. **None found:**
 - no `localStorage` or other host-specific state
 - one file, lowercase name, no case-sensitivity exposure
 - LF line endings already
+
+## Linux restore log (2026-09-21, Ubuntu 26.04)
+
+- Cloned fresh from `origin/master` (HEAD `a020be5`) into `/home/ryan/projects/pi-clock`.
+- No untracked files to copy (backup folder contained only the repo). No secrets.
+- Added `.claude/settings.local.json` with `autoMemoryDirectory` →
+  `/home/ryan/projects/pi-clock/.claude/agent-memory` (MEMORY.md present from the clone);
+  added `.gitignore` so that local settings file is never committed.
+- Line endings already LF; no Windows-isms found (re-audited: no `C:\`, no scripts).
+- Added a short `CLAUDE.md` with Linux run/smoke-check commands.
+- Smoke check: headless Google Chrome screenshot of `index.html` renders the hand field,
+  countdown, speed controls and credit correctly.
+- Still outstanding (not done by the restore, remote change): GitHub homepage field is stale —
+  `gh repo edit ryannorris14/pi-clock --homepage https://pi-clock-314.vercel.app`.
